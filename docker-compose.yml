@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: orders
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  app:
+    build:
+      # Context is the parent libs/ directory so the Dockerfile can access both projects
+      context: ..
+      dockerfile: spring-durable-executor-sample/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/orders
+      SPRING_DATASOURCE_USERNAME: orders
+      SPRING_DATASOURCE_PASSWORD: orders
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      DURABLE_STORE_PATH: /app/data/durable-executions.json
+      # 30% chance each step fails — makes crash/recovery visible in the load test.
+      # Set to 0.0 to run without failures.
+      ORDER_FAIL_PROBABILITY: "0.3"
+    volumes:
+      - durable-store:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  durable-store:
