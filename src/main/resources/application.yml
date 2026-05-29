@@ -20,6 +20,15 @@ durable:
 order:
   fail-probability: 0.0
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
+
 logging:
   level:
     com.durableexecutor: INFO

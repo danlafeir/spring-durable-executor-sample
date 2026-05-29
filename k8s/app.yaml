@@ -1,0 +1,130 @@
+# Build and load the image before applying:
+#
+#   Local cluster (kind):
+#     docker build -f Dockerfile -t order-service:latest ..
+#     kind load docker-image order-service:latest
+#
+#   Minikube:
+#     eval $(minikube docker-env)
+#     docker build -f Dockerfile -t order-service:latest ..
+#
+#   Remote registry:
+#     docker build -f Dockerfile -t your-registry/order-service:latest ..
+#     docker push your-registry/order-service:latest
+#     # update image: field below
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+data:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/orders"
+  SPRING_DATASOURCE_USERNAME: "orders"
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+  DURABLE_STORE_PATH: "/app/data/durable-executions.json"
+  # 30% chance each step fails — makes recovery observable during chaos tests.
+  # Set to "0.0" to run without failures.
+  ORDER_FAIL_PROBABILITY: "0.3"
+
+---
+# External-facing service — exposes POST /orders and GET /admin/audit
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  type: LoadBalancer    # use NodePort if LoadBalancer is unavailable
+  selector:
+    app: order-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+# Headless service required by the StatefulSet for stable pod DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service-headless
+spec:
+  clusterIP: None
+  selector:
+    app: order-service
+  ports:
+    - port: 8080
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: order-service
+spec:
+  serviceName: order-service-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      # Allow 60s for in-flight durable executions to complete before a pod
+      # is forcibly killed. Spring Boot needs time to finish the recovery loop
+      # on graceful shutdown. Tune alongside server.shutdown=graceful.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: order-service
+          image: order-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: order-service-config
+          env:
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+            # Make each pod's store path unique — though each pod already has
+            # its own PVC, this makes the path explicit in logs.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: durable-store
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+  # Each pod gets its own PVC. When a pod restarts (random kill), it remounts
+  # the same PVC and recovers its own durable-executions.json on startup.
+  volumeClaimTemplates:
+    - metadata:
+        name: durable-store
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 100Mi
