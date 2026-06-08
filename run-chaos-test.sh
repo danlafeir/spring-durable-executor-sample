@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full chaos test: build → deploy → fresh PVCs → load + chaos → validate → report.
+# Full chaos test: build → deploy → fresh PVCs (DB + durable store) → load + chaos → validate → report.
 #
 # Designed to be run by a human or an automated agent with no interactive steps.
 #
@@ -129,36 +129,48 @@ fi
 # Scale the StatefulSet to 0, delete all durable-store PVCs so every run
 # starts from a clean slate, then scale back up.  This prevents leftover
 # durable records or DLQ files from a previous run from polluting results.
-step "Resetting PVCs for a clean durable store"
+step "Resetting all PVCs for a clean run (empty database + empty durable store)"
 REPLICAS=$(kubectl get statefulset -n "$NAMESPACE" order-service \
     -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 3)
 
+# Scale everything down first so no pod holds a PVC open
 kubectl scale -n "$NAMESPACE" statefulset/order-service --replicas=0 2>&1
+kubectl scale -n "$NAMESPACE" statefulset/postgres    --replicas=0 2>&1
 kubectl wait -n "$NAMESPACE" pod \
     -l app=order-service --for=delete --timeout=90s 2>/dev/null || true
+kubectl wait -n "$NAMESPACE" pod \
+    -l app=postgres --for=delete --timeout=90s 2>/dev/null || true
 
-# Patch away the pvc-protection finalizer before deleting so we don't
-# have to wait for the protection controller to release it.
-for pvc in $(kubectl get pvc -n "$NAMESPACE" -l app=order-service \
-        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-    kubectl patch pvc "$pvc" -n "$NAMESPACE" \
-        --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' \
-        2>/dev/null || true
-done
-kubectl delete pvc -n "$NAMESPACE" -l app=order-service \
-    --grace-period=0 --force 2>/dev/null || true
+# Patch away pvc-protection finalizers and delete all PVCs
+delete_pvcs() {
+    local selector="$1"
+    for pvc in $(kubectl get pvc -n "$NAMESPACE" -l "$selector" \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+        kubectl patch pvc "$pvc" -n "$NAMESPACE" \
+            --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]' \
+            2>/dev/null || true
+    done
+    kubectl delete pvc -n "$NAMESPACE" -l "$selector" \
+        --grace-period=0 --force 2>/dev/null || true
+}
 
-# Wait for all PVCs to be gone before scaling back up, otherwise the
-# StatefulSet may reattach the old volumes instead of creating fresh ones.
+delete_pvcs "app=order-service"
+delete_pvcs "app=postgres"
+
+# Wait until all targeted PVCs are gone before scaling back up
 ok "waiting for PVCs to terminate..."
-until [[ $(kubectl get pvc -n "$NAMESPACE" -l app=order-service \
+until [[ $(kubectl get pvc -n "$NAMESPACE" \
+        -l 'app in (order-service,postgres)' \
         --no-headers 2>/dev/null | wc -l | tr -d ' ') -eq 0 ]]; do
     sleep 2
 done
 
+# Bring postgres up first so the schema is ready when order-service starts
+kubectl scale -n "$NAMESPACE" statefulset/postgres --replicas=1 2>&1
+kubectl rollout status -n "$NAMESPACE" statefulset/postgres --timeout=120s
 kubectl scale -n "$NAMESPACE" statefulset/order-service --replicas="$REPLICAS" 2>&1
 kubectl rollout status -n "$NAMESPACE" statefulset/order-service --timeout=300s
-ok "fresh PVCs ready — durable store is empty"
+ok "fresh PVCs ready — empty database, empty durable store"
 
 # ── port-forward ──────────────────────────────────────────────────────────────
 step "Starting port-forward (auto-reconnect)"

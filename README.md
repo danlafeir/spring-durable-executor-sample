@@ -91,8 +91,9 @@ validate.sh     Polls /admin/audit until all orders are FULFILLED or times out
 
 `run-chaos-test.sh` orchestrates the full cycle — build, deploy, PVC reset,
 load + chaos, wait for recovery, validate, write results — in a single
-unattended invocation. Every run starts with fresh empty durable stores so
-leftover records from previous runs can never pollute results:
+unattended invocation. Every run resets both the postgres PVC (empty database) and the
+order-service PVCs (empty durable stores) so no leftover orders or
+durable records from a previous run can pollute results:
 
 ```bash
 # Full run (build image, deploy, test, validate)
