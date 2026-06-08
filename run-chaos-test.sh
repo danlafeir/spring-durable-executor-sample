@@ -35,6 +35,7 @@ SKIP_DEPLOY=false
 LOAD_RATE=0.5
 CHAOS_INTERVAL=8
 CHAOS_PG_EVERY=5
+CHAOS_PV_EVERY=0
 DURATION=180
 VALIDATE_TIMEOUT=600
 NAMESPACE=default
@@ -48,6 +49,7 @@ while [[ $# -gt 0 ]]; do
         --load-rate)         LOAD_RATE="$2"; shift ;;
         --chaos-interval)    CHAOS_INTERVAL="$2"; shift ;;
         --chaos-pg-every)    CHAOS_PG_EVERY="$2"; shift ;;
+        --chaos-pv-every)    CHAOS_PV_EVERY="$2"; shift ;;
         --duration)          DURATION="$2"; shift ;;
         --validate-timeout)  VALIDATE_TIMEOUT="$2"; shift ;;
         --namespace)         NAMESPACE="$2"; shift ;;
@@ -158,13 +160,14 @@ ok "service healthy (HTTP 200)"
 step "Running load test + chaos for ${DURATION}s"
 echo "  load rate      : 1 order every ${LOAD_RATE}s"
 echo "  chaos interval : ${CHAOS_INTERVAL}s between pod kills"
-echo "  postgres kill  : every ${CHAOS_PG_EVERY} app kills"
+echo "  postgres kill  : every ${CHAOS_PG_EVERY} app kills$([ "$CHAOS_PG_EVERY" = "0" ] && echo " (disabled)" || true)"
+echo "  pv kill        : every ${CHAOS_PV_EVERY} app kills$([ "$CHAOS_PV_EVERY" = "0" ] && echo " (disabled)" || true)"
 
 "$SCRIPT_DIR/load-test.sh" http://localhost:8080 "$LOAD_RATE" \
     > "$OUTPUT_DIR/load-test.log" 2>&1 &
 LOAD_PID=$!
 
-"$SCRIPT_DIR/chaos.sh" order-service "$CHAOS_INTERVAL" "$NAMESPACE" "$CHAOS_PG_EVERY" \
+"$SCRIPT_DIR/chaos.sh" order-service "$CHAOS_INTERVAL" "$NAMESPACE" "$CHAOS_PG_EVERY" "$CHAOS_PV_EVERY" \
     > "$OUTPUT_DIR/chaos.log" 2>&1 &
 CHAOS_PID=$!
 
@@ -228,6 +231,7 @@ echo "Liveness probe failures during test: $LIVENESS_FAILS"
 # ── summary ───────────────────────────────────────────────────────────────────
 KILLS=$(grep -c "kill #" "$OUTPUT_DIR/chaos.log" 2>/dev/null || echo 0)
 PG_KILLS=$(grep -c "killing postgres" "$OUTPUT_DIR/chaos.log" 2>/dev/null || echo 0)
+PV_KILLS=$(grep -c "deleting PVC" "$OUTPUT_DIR/chaos.log" 2>/dev/null || echo 0)
 ORDERS_SUBMITTED=$(wc -l < "$OUTPUT_DIR/load-test.log" 2>/dev/null || echo "?")
 TOTAL=$(jq -r '.total // 0' "$OUTPUT_DIR/audit-final.json")
 FULFILLED=$(jq -r '.byStatus.FULFILLED // 0' "$OUTPUT_DIR/audit-final.json")
@@ -254,12 +258,14 @@ cat > "$OUTPUT_DIR/summary.md" << SUMMARY
 | Liveness probe failures | ${LIVENESS_FAILS} |
 | App pod kills | ${KILLS} |
 | Postgres kills | ${PG_KILLS} |
+| PVC deletions | ${PV_KILLS} |
 | validate.sh exit | ${VALIDATE_EXIT} |
 
 ## Configuration
 - load-rate: ${LOAD_RATE}s / order
 - chaos-interval: ${CHAOS_INTERVAL}s
 - postgres-kill-every: ${CHAOS_PG_EVERY}
+- pv-kill-every: ${CHAOS_PV_EVERY}
 - duration: ${DURATION}s
 - validate-timeout: ${VALIDATE_TIMEOUT}s
 

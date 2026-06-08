@@ -103,7 +103,8 @@ wait for recovery, validate, write results — in a single unattended invocation
 ./run-chaos-test.sh \
   --load-rate 0.5 \        # seconds between orders (0.5 = 2/s)
   --chaos-interval 8 \     # seconds between pod kills
-  --chaos-pg-every 5 \     # kill postgres on every 5th app kill
+  --chaos-pg-every 5 \     # kill postgres on every 5th app kill (0 = disabled)
+  --chaos-pv-every 7 \     # delete pod's PVC on every 7th kill (0 = disabled)
   --duration 180 \         # seconds to run load+chaos
   --validate-timeout 600   # seconds to wait for all orders to FULFILL
 ```
@@ -123,6 +124,7 @@ Exit codes: `0` = all orders FULFILLED, `1` = orders remain incomplete, `2` = pr
 | `validate.sh` | FAIL is normal if CREATED orphans exist (pre-dispatch window); PASS means zero incomplete orders |
 | `DLQ populated` | YES when postgres is killed during startup recovery — confirms the DLQ path works |
 | `Liveness probe deaths` | NONE — any value > 0 means concurrent startup recovery is not working |
+| `PVC deletions` | When `--chaos-pv-every` > 0, the pod's entire durable store is wiped; orders in-flight on that pod are permanently lost with no recovery |
 
 ---
 
