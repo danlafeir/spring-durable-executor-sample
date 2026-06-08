@@ -87,6 +87,45 @@ validate.sh     Polls /admin/audit until all orders are FULFILLED or times out
 
 ---
 
+## Automated test (agent-friendly)
+
+`run-chaos-test.sh` orchestrates the full cycle — build, deploy, load + chaos,
+wait for recovery, validate, write results — in a single unattended invocation:
+
+```bash
+# Full run (build image, deploy, test, validate)
+./run-chaos-test.sh
+
+# Skip build and deploy when the cluster is already running
+./run-chaos-test.sh --skip-build --skip-deploy
+
+# Tune parameters
+./run-chaos-test.sh \
+  --load-rate 0.5 \        # seconds between orders (0.5 = 2/s)
+  --chaos-interval 8 \     # seconds between pod kills
+  --chaos-pg-every 5 \     # kill postgres on every 5th app kill
+  --duration 180 \         # seconds to run load+chaos
+  --validate-timeout 600   # seconds to wait for all orders to FULFILL
+```
+
+Results are written to `output/run-TIMESTAMP/`:
+- `summary.md` — pass/fail verdict, DLQ count, liveness probe failures, configuration
+- `chaos.log`, `load-test.log`, `validate.log` — raw output from each phase
+- `audit-pre-validate.json`, `audit-final.json` — DB state snapshots
+- `dlq-pre-validate.json`, `dlq-final.json` — dead letter queue snapshots
+
+Exit codes: `0` = all orders FULFILLED, `1` = orders remain incomplete, `2` = pre-flight failure.
+
+**What to check in `summary.md`:**
+
+| Check | Expected |
+|---|---|
+| `validate.sh` | FAIL is normal if CREATED orphans exist (pre-dispatch window); PASS means zero incomplete orders |
+| `DLQ populated` | YES when postgres is killed during startup recovery — confirms the DLQ path works |
+| `Liveness probe deaths` | NONE — any value > 0 means concurrent startup recovery is not working |
+
+---
+
 ## Building and deploying
 
 The Dockerfile uses a composite Gradle build. Both this repo and the
