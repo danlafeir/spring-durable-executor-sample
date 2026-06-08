@@ -1,7 +1,7 @@
 rootProject.name = "spring-durable-executor-sample"
 
-includeBuild("../spring-durable-executor") {
+includeBuild("../durable-executor") {
     dependencySubstitution {
-        substitute(module("com.durableexecutor:spring-durable-executor")).using(project(":"))
+        substitute(module("com.github.danlafeir:durable-executor-spring")).using(project(":durable-executor-spring"))
     }
 }

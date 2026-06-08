@@ -1,8 +1,6 @@
 package com.example.orderservice.service;
 
-import com.durableexecutor.DurableExecutor;
-import com.durableexecutor.annotation.DurableWorkflow;
-import com.durableexecutor.annotation.ExecutionId;
+import com.github.danlafeir.durableexecutor.annotation.Durable;
 import com.example.orderservice.model.Order;
 import com.example.orderservice.model.OrderStatus;
 import com.example.orderservice.repository.OrderRepository;
@@ -18,60 +16,50 @@ public class OrderProcessingService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderProcessingService.class);
 
-    @Value("${order.fail-probability:0.0}")
-    private double failProbability;
+    @Value("${order.step-delay-ms:10000}")
+    private long stepDelayMs;
 
     private final OrderRepository orderRepository;
-    private final DurableExecutor durableExecutor;
 
-    public OrderProcessingService(OrderRepository orderRepository, DurableExecutor durableExecutor) {
+    public OrderProcessingService(OrderRepository orderRepository) {
         this.orderRepository = orderRepository;
-        this.durableExecutor = durableExecutor;
     }
 
     /**
      * Durable four-step order workflow.
      *
-     * Each step's completion is checkpointed in the durable store. If the JVM
-     * crashes mid-workflow, recovery re-runs from the last incomplete step.
-     * The @ExecutionId parameter receives the execution ID so it can be stored
-     * on the Order entity for correlation with admin/executions.
+     * The @Durable aspect persists the method arguments before execution and removes
+     * the record on success. If the JVM crashes mid-workflow the record survives and
+     * DurableRecovery re-invokes this method on the next startup.
      */
-    @DurableWorkflow
-    public void processOrder(String orderId, @ExecutionId String execId) {
-        log.info("Processing order {} [execution={}]", orderId, execId);
+    @Durable
+    public void processOrder(String orderId) {
+        log.info("Processing order {}", orderId);
 
-        durableExecutor.step("validate", () -> {
-            Order order = findOrder(orderId);
-            order.setExecutionId(execId);
-            order.setStatus(OrderStatus.VALIDATING);
-            orderRepository.save(order);
-            log.info("Order {} validated [exec={}]", orderId, execId);
-        });
+        Order order = findOrder(orderId);
+        order.setStatus(OrderStatus.VALIDATING);
+        orderRepository.save(order);
+        log.info("Order {} validated", orderId);
 
-        durableExecutor.step("reserve", () -> {
-            maybeThrow("reserve", orderId);
-            updateStatus(orderId, OrderStatus.RESERVED);
-            log.info("Order {} reserved", orderId);
-        });
+        sleep();
+        updateStatus(orderId, OrderStatus.RESERVED);
+        log.info("Order {} reserved", orderId);
 
-        durableExecutor.step("charge", () -> {
-            maybeThrow("charge", orderId);
-            updateStatus(orderId, OrderStatus.CHARGED);
-            log.info("Order {} charged", orderId);
-        });
+        sleep();
+        updateStatus(orderId, OrderStatus.CHARGED);
+        log.info("Order {} charged", orderId);
 
-        durableExecutor.step("fulfill", () -> {
-            updateStatus(orderId, OrderStatus.FULFILLED);
-            log.info("Order {} fulfilled", orderId);
-        });
+        sleep();
+        updateStatus(orderId, OrderStatus.FULFILLED);
+        log.info("Order {} fulfilled", orderId);
     }
 
-    private void maybeThrow(String step, String orderId) {
-        if (failProbability > 0.0 && Math.random() < failProbability) {
-            throw new RuntimeException(String.format(
-                    "Simulated failure at step '%s' for order %s (p=%.1f) — will retry on recovery",
-                    step, orderId, failProbability));
+    private void sleep() {
+        try {
+            Thread.sleep(stepDelayMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during step delay", e);
         }
     }
 

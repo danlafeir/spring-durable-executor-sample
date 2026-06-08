@@ -15,10 +15,13 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
 durable:
-  store-path: ./durable-executions.json
+  store-path: ./durable-executions
+  dead-letter-path: ./durable-dlq
+  dlq-endpoint:
+    enabled: true
 
 order:
-  fail-probability: 0.0
+  step-delay-ms: 100   # 10s per step × 3 steps = ~30s per order
 
 management:
   endpoints:
@@ -31,5 +34,5 @@ management:
 
 logging:
   level:
-    com.durableexecutor: INFO
+    com.github.danlafeir.durableexecutor: INFO
     com.example.orderservice: INFO

@@ -22,10 +22,11 @@ data:
   SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/orders"
   SPRING_DATASOURCE_USERNAME: "orders"
   SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
-  DURABLE_STORE_PATH: "/app/data/durable-executions.json"
-  # 30% chance each step fails — makes recovery observable during chaos tests.
-  # Set to "0.0" to run without failures.
-  ORDER_FAIL_PROBABILITY: "0.3"
+  DURABLE_STORE_PATH: "/app/data/durable-executions"
+  DURABLE_DEAD_LETTER_PATH: "/app/data/durable-dlq"
+  DURABLE_DLQ_ENDPOINT_ENABLED: "true"
+  DURABLE_STUCK_GRACE_PERIOD: "PT10S"
+  ORDER_STEP_DELAY_MS: "3000"
 
 ---
 # External-facing service — exposes POST /orders and GET /admin/audit
@@ -103,15 +104,15 @@ spec:
             httpGet:
               path: /actuator/health
               port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 5
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8080
-            initialDelaySeconds: 60
-            periodSeconds: 30
+            initialDelaySeconds: 15
+            periodSeconds: 15
           resources:
             requests:
               cpu: 250m

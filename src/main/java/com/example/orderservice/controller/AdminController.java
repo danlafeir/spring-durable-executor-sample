@@ -1,7 +1,7 @@
 package com.example.orderservice.controller;
 
-import com.durableexecutor.model.DurableExecution;
-import com.durableexecutor.store.DurableStore;
+import com.github.danlafeir.durableexecutor.model.DurableExecution;
+import com.github.danlafeir.durableexecutor.store.DurableStore;
 import com.example.orderservice.model.AuditReport;
 import com.example.orderservice.model.AuditReport.IncompleteOrder;
 import com.example.orderservice.model.Order;
@@ -10,6 +10,7 @@ import com.example.orderservice.repository.OrderRepository;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -50,7 +51,10 @@ public class AdminController {
                 .collect(Collectors.toList());
 
         Map<String, DurableExecution> pending = durableStore.loadAll();
-        List<DurableExecution> stuck = durableStore.findStuck(Duration.ofMinutes(5));
+        Instant stuckThreshold = Instant.now().minus(Duration.ofMinutes(5));
+        List<DurableExecution> stuck = pending.values().stream()
+                .filter(e -> e.getCreatedAt().isBefore(stuckThreshold))
+                .collect(Collectors.toList());
 
         boolean allComplete = incomplete.isEmpty() && pending.isEmpty();
 
@@ -70,11 +74,14 @@ public class AdminController {
     }
 
     /**
-     * Executions whose lastAttemptAt is older than {@code minutes} minutes.
+     * Executions whose createdAt is older than {@code minutes} minutes.
      * These represent orders stuck in mid-flight that have not been retried recently.
      */
     @GetMapping("/stuck")
     public List<DurableExecution> getStuck(@RequestParam(defaultValue = "5") long minutes) {
-        return durableStore.findStuck(Duration.ofMinutes(minutes));
+        Instant threshold = Instant.now().minus(Duration.ofMinutes(minutes));
+        return durableStore.loadAll().values().stream()
+                .filter(e -> e.getCreatedAt().isBefore(threshold))
+                .collect(Collectors.toList());
     }
 }
