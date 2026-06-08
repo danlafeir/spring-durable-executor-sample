@@ -1,6 +1,7 @@
 package com.example.orderservice.service;
 
 import com.github.danlafeir.durableexecutor.annotation.Durable;
+import com.github.danlafeir.durableexecutor.annotation.Durable.CloseMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,7 +39,7 @@ public class OrderDispatcher {
         this.taskExecutor = taskExecutor;
     }
 
-    @Durable
+    @Durable(closeMode = CloseMode.IDEMPOTENT)
     public void dispatch(String orderId) {
         taskExecutor.execute(() -> {
             try {

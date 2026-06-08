@@ -21,6 +21,7 @@ public class OrderService {
         this.orderRepository = orderRepository;
     }
 
+    @Durable(closeMode = CloseMode.TRANSACTIONAL)
     @Transactional
     public Order create(OrderRequest request) {
         Order order = new Order();

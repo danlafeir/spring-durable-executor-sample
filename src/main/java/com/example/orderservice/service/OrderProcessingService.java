@@ -1,6 +1,7 @@
 package com.example.orderservice.service;
 
 import com.github.danlafeir.durableexecutor.annotation.Durable;
+import com.github.danlafeir.durableexecutor.annotation.Durable.CloseMode;
 import com.example.orderservice.model.Order;
 import com.example.orderservice.model.OrderStatus;
 import com.example.orderservice.repository.OrderRepository;
@@ -32,7 +33,6 @@ public class OrderProcessingService {
      * the record on success. If the JVM crashes mid-workflow the record survives and
      * DurableRecovery re-invokes this method on the next startup.
      */
-    @Durable
     public void processOrder(String orderId) {
         log.info("Processing order {}", orderId);
 
